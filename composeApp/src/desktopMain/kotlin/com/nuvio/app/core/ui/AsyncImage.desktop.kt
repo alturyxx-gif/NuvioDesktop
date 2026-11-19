@@ -31,6 +31,7 @@ import coil3.compose.AsyncImagePainter
 import coil3.compose.LocalPlatformContext
 import coil3.request.ImageRequest
 import coil3.request.NullRequestDataException
+import coil3.size.Precision
 import org.jetbrains.skia.Bitmap
 import org.jetbrains.skia.FilterMipmap
 import org.jetbrains.skia.FilterMode
@@ -179,7 +180,15 @@ private fun Any?.withDesktopImageOptions(
         ImageRequest.Builder(context).data(this)
     }
     builder.apply {
-        if (highQualitySize) size(MaxDesktopSourceSizePx)
+        if (highQualitySize) {
+            // MaxDesktopSourceSizePx is a ceiling, not a target. With the default EXACT
+            // precision Coil scales every image to fit 1536px, so a 500x750 TMDB poster
+            // was decoded upscaled to 1024x1536 (4x the pixels and memory) only to be
+            // scaled back down at draw time. INEXACT keeps large sources capped and
+            // leaves smaller ones at their native size.
+            size(MaxDesktopSourceSizePx)
+            precision(Precision.INEXACT)
+        }
         if (animated) {
             extras[NuvioAnimatedImageKey] = true
             memoryCacheKeyExtra("nuvio.animated", "true")
@@ -225,6 +234,10 @@ private class ScaledBitmapPainter(
         }
 
         val bitmap = scaledBitmap(cacheSize)
+        if (bitmap == null) {
+            drawSource(drawSize)
+            return
+        }
 
         drawImage(
             image = bitmap,
@@ -248,10 +261,9 @@ private class ScaledBitmapPainter(
         return true
     }
 
-    private fun scaledBitmap(size: IntSize): ImageBitmap {
-        cachedBitmap?.let { bitmap ->
-            if (cachedSize == size) return bitmap
-        }
+    private fun scaledBitmap(size: IntSize): ImageBitmap? {
+        if (cachedSize == size) return cachedBitmap
+        // A failed scale is remembered as null for this size so it isn't retried every frame.
         return image.scale(size.width, size.height).also { bitmap ->
             cachedSize = size
             cachedBitmap = bitmap
@@ -303,7 +315,7 @@ private class ScaledBitmapPainter(
     private fun IntSize.pixelCount(): Long =
         width.toLong() * height.toLong()
 
-    private fun ImageBitmap.scale(width: Int, height: Int): ImageBitmap {
+    private fun ImageBitmap.scale(width: Int, height: Int): ImageBitmap? {
         val image = SkiaImage.makeFromBitmap(asSkiaBitmap())
         return try {
             image.scale(width, height)
@@ -312,14 +324,26 @@ private class ScaledBitmapPainter(
         }
     }
 
-    private fun SkiaImage.scale(width: Int, height: Int): ImageBitmap {
+    private fun SkiaImage.scale(width: Int, height: Int): ImageBitmap? {
         val bitmap = Bitmap()
-        bitmap.allocN32Pixels(width, height)
-        scalePixels(
-            bitmap.peekPixels()!!,
+        // allocN32Pixels does not clear memory: if scalePixels fails the bitmap holds
+        // whatever was previously in that native allocation, which renders as random
+        // blocks. Only use the result when the scale actually wrote every pixel.
+        if (!bitmap.allocN32Pixels(width, height)) {
+            bitmap.close()
+            return null
+        }
+        val pixmap = bitmap.peekPixels()
+        val scaled = pixmap != null && scalePixels(
+            pixmap,
             FilterMipmap(FilterMode.LINEAR, MipmapMode.LINEAR),
             false,
         )
+        if (!scaled) {
+            bitmap.close()
+            return null
+        }
+        bitmap.setImmutable()
         return bitmap.asComposeImageBitmap()
     }
 }

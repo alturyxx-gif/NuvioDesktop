@@ -49,6 +49,7 @@ typedef enum mpv_format {
 typedef enum mpv_event_id {
     MPV_EVENT_NONE = 0,
     MPV_EVENT_SHUTDOWN = 1,
+    MPV_EVENT_VIDEO_RECONFIG = 17,
 } mpv_event_id;
 
 typedef struct mpv_event {
@@ -1411,6 +1412,10 @@ private:
     std::atomic_bool stopping = false;
     std::atomic_bool shuttingDown = false;
     std::atomic_bool hwdecLogged = false;  // one-shot log for hwdec-current
+    // True when startMpv chose the quality scalers (deband + spline36) instead of
+    // profile=fast; only then is there anything to relax for high-resolution sources.
+    bool qualityScalersConfigured = false;
+    bool highResolutionTuningApplied = false;
 
     bool hasAppliedSubtitleStyle = false;
     bool appliedSubtitleUseLibass = false;
@@ -1787,9 +1792,15 @@ private:
             } else {
                 setMpvOptionStringLocked("vd-lavc-software-fallback", "yes");
             }
-            setMpvOptionStringLocked("vd-lavc-threads", "4");
+            // 0 = one decoder thread per logical CPU. A fixed 4 capped software
+            // decoding (the fallback when the GPU can't decode e.g. 10-bit HEVC or
+            // AV1), which is exactly the case that can't keep up with 4K. Linux and
+            // macOS already use 0.
+            setMpvOptionStringLocked("vd-lavc-threads", "0");
             setMpvOptionStringLocked("tone-mapping", "bt.2390");
             setMpvOptionStringLocked("dither-depth", "auto");
+            qualityScalersConfigured = !fastProfile;
+            highResolutionTuningApplied = false;
             if (fastProfile) {
                 setMpvOptionStringLocked("profile", "fast");
             } else {
@@ -2058,7 +2069,34 @@ private:
             if (event->event_id == MPV_EVENT_SHUTDOWN) {
                 return;
             }
+            if (event->event_id == MPV_EVENT_VIDEO_RECONFIG) {
+                applySourceResolutionTuning();
+            }
         }
+    }
+
+    // deband and spline36 chroma scaling run at the source resolution, so on a 4K
+    // (often 10-bit HDR) source they cost roughly 4x what they do at 1080p. Discrete
+    // GPUs in low-power laptops (MX-class, entry Radeon) don't take the UMA fast path
+    // and drop frames there. 4K sources are high bitrate and rarely band, and their
+    // chroma is already near output resolution, so the cheap paths lose little.
+    // Re-evaluated on every reconfig so a 1080p file after a 4K one gets them back.
+    void applySourceResolutionTuning() {
+        std::lock_guard<std::mutex> lock(mpvMutex);
+        if (!mpv || !qualityScalersConfigured) return;
+        MpvApi &api = mpvApi();
+        int64_t width = 0;
+        int64_t height = 0;
+        if (api.getProperty(mpv, "video-params/w", MPV_FORMAT_INT64, &width) < 0 ||
+            api.getProperty(mpv, "video-params/h", MPV_FORMAT_INT64, &height) < 0 ||
+            width <= 0 || height <= 0) {
+            return;
+        }
+        bool highResolution = width > 2560 || height > 1600;
+        if (highResolution == highResolutionTuningApplied) return;
+        api.setPropertyString(mpv, "deband", highResolution ? "no" : "yes");
+        api.setPropertyString(mpv, "cscale", highResolution ? "bilinear" : "spline36");
+        highResolutionTuningApplied = highResolution;
     }
 
     JNIEnv *jniEnvDidAttach(bool *didAttach) {

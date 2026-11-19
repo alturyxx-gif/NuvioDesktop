@@ -75,7 +75,7 @@ import com.nuvio.app.core.ui.centeredVerticalBarPadding
 import com.nuvio.app.core.ui.withVerticalBar
 import com.nuvio.app.features.home.MetaPreview
 import com.nuvio.app.features.home.stableKey
-import com.nuvio.app.features.tmdb.originalTmdbImageUrl
+import com.nuvio.app.features.tmdb.tmdbBackdropUrlForDisplayWidth
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -282,7 +282,7 @@ private fun HeroBackgroundLayers(
                 .heroStretchZoom(stretchPx)
         }
         AsyncImage(
-            model = if (desktopFrame) originalTmdbImageUrl(imageUrl) else imageUrl,
+            model = if (desktopFrame) tmdbBackdropUrlForDisplayWidth(imageUrl, heroWidthPx) else imageUrl,
             contentDescription = item.name,
             desktopAnimation = NuvioDesktopAnimation.Always,
             modifier = backgroundModifier

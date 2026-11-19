@@ -32,4 +32,20 @@ class TmdbImageUrlsTest {
     fun `null image url remains null`() {
         assertNull(originalTmdbImageUrl(null))
     }
+
+    @Test
+    fun `backdrop keeps w1280 on surfaces up to 1920px wide`() {
+        val imageUrl = "https://image.tmdb.org/t/p/w1280/backdrop.jpg"
+
+        assertEquals(imageUrl, tmdbBackdropUrlForDisplayWidth(imageUrl, 1366f))
+        assertEquals(imageUrl, tmdbBackdropUrlForDisplayWidth(imageUrl, 1920f))
+    }
+
+    @Test
+    fun `backdrop uses original on surfaces wider than 1920px`() {
+        assertEquals(
+            "https://image.tmdb.org/t/p/original/backdrop.jpg",
+            tmdbBackdropUrlForDisplayWidth("https://image.tmdb.org/t/p/w1280/backdrop.jpg", 2560f),
+        )
+    }
 }
