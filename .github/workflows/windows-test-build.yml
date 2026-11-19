@@ -1,6 +1,6 @@
 name: Windows Test Build
 
-# Unsigned Windows MSI for testing a branch, without the release secrets.
+# Unsigned portable Windows build for testing a branch, without the release secrets.
 # Sign-in, sync and Trakt need NUVIO_DESKTOP_LOCAL_PROPERTIES_BASE64; when that
 # secret is absent the build still succeeds and those features are disabled.
 
@@ -24,7 +24,7 @@ permissions:
 
 jobs:
   windows:
-    name: Windows x64 MSI
+    name: Windows x64 portable
     runs-on: windows-2022
     timeout-minutes: 90
     env:
@@ -103,42 +103,33 @@ jobs:
             --stacktrace
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      - name: Build MSI
+      - name: Build portable app
         shell: pwsh
         run: |
+          # No MSI: a test-build installer would upgrade over an installed release.
           & .\gradlew.bat `
-            :composeApp:packageReleaseMsi `
+            :composeApp:createReleaseDistributable `
             "-Pnuvio.webview2.dir=$env:WEBVIEW2_ROOT" `
+            "-Pnuvio.desktop.dataDirName=NuvioTestBuild" `
             "-Pcompose.desktop.packaging.checkJdkVendor=false" `
             --no-configuration-cache `
             --stacktrace
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-      - name: Package portable build
-        shell: pwsh
-        run: |
-          # packageReleaseMsi builds this app folder first; zipping it gives a no-install build.
           $appDir = "composeApp\build\compose\binaries\main-release\app\Nuvio"
           if (-not (Test-Path "$appDir\Nuvio.exe")) {
             throw "Expected the app folder with Nuvio.exe at $appDir"
           }
-          New-Item -ItemType Directory -Force -Path portable | Out-Null
-          Compress-Archive -Path $appDir -DestinationPath portable\Nuvio-Windows-x64-portable.zip
+          $cfg = Get-Content "$appDir\app\Nuvio.cfg" -Raw
+          if ($cfg -notmatch "nuvio.desktop.dataDirName=NuvioTestBuild") {
+            throw "The test-build data folder option is missing from Nuvio.cfg"
+          }
 
       - name: Upload portable build
         uses: actions/upload-artifact@v7
         with:
+          # GitHub zips the artifact itself, so uploading the folder gives one zip
+          # with a Nuvio folder inside.
           name: nuvio-windows-x64-portable-${{ github.sha }}
-          path: portable/Nuvio-Windows-x64-portable.zip
-          if-no-files-found: error
-          retention-days: 14
-          # Already a zip; recompressing only costs time.
-          compression-level: 0
-
-      - name: Upload MSI
-        uses: actions/upload-artifact@v7
-        with:
-          name: nuvio-windows-x64-msi-${{ github.sha }}
-          path: composeApp/build/compose/release-msis/*.msi
+          path: composeApp/build/compose/binaries/main-release/app/
           if-no-files-found: error
           retention-days: 14

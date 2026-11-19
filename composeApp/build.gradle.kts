@@ -1289,6 +1289,10 @@ compose.desktop {
             "--add-opens=java.desktop/sun.awt.windows=ALL-UNNAMED",
             "--add-opens=java.desktop/sun.awt.X11=ALL-UNNAMED",
             smokePlayerUrl?.takeIf { it.isNotBlank() }?.let { "-Dnuvio.desktop.smokePlayerUrl=$it" },
+            // Test builds keep their settings and caches apart from an installed release.
+            providers.gradleProperty("nuvio.desktop.dataDirName").orNull
+                ?.takeIf { it.isNotBlank() }
+                ?.let { "-Dnuvio.desktop.dataDirName=$it" },
         )
 
         nativeDistributions {

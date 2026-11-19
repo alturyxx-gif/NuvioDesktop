@@ -40,18 +40,28 @@ internal object DesktopStorage {
         }
     }
 
+    /**
+     * Folder name for settings and caches. Test builds set `nuvio.desktop.dataDirName` so
+     * they never read or modify the installed app's data (profiles, sign-in, addons).
+     */
+    private val dataDirName: String =
+        System.getProperty("nuvio.desktop.dataDirName")
+            ?.trim()
+            ?.takeIf { name -> name.isNotEmpty() && name.none { it == '/' || it == '\\' || it == ':' } }
+            ?: "Nuvio"
+
     private fun resolveAppDataDir(): Path {
         val osName = System.getProperty("os.name").orEmpty().lowercase(Locale.ROOT)
         val userHome = Paths.get(System.getProperty("user.home").orEmpty())
         return when {
-            osName.contains("mac") -> userHome.resolve("Library/Application Support/Nuvio")
+            osName.contains("mac") -> userHome.resolve("Library/Application Support").resolve(dataDirName)
             osName.contains("win") -> {
                 val appData = System.getenv("APPDATA")?.takeIf { it.isNotBlank() }
-                (appData?.let(Paths::get) ?: userHome.resolve("AppData/Roaming")).resolve("Nuvio")
+                (appData?.let(Paths::get) ?: userHome.resolve("AppData/Roaming")).resolve(dataDirName)
             }
             else -> {
                 val xdgConfig = System.getenv("XDG_CONFIG_HOME")?.takeIf { it.isNotBlank() }
-                (xdgConfig?.let(Paths::get) ?: userHome.resolve(".config")).resolve("nuvio")
+                (xdgConfig?.let(Paths::get) ?: userHome.resolve(".config")).resolve(dataDirName.lowercase(Locale.ROOT))
             }
         }
     }
@@ -60,14 +70,14 @@ internal object DesktopStorage {
         val osName = System.getProperty("os.name").orEmpty().lowercase(Locale.ROOT)
         val userHome = Paths.get(System.getProperty("user.home").orEmpty())
         return when {
-            osName.contains("mac") -> userHome.resolve("Library/Caches/Nuvio")
+            osName.contains("mac") -> userHome.resolve("Library/Caches").resolve(dataDirName)
             osName.contains("win") -> {
                 val localAppData = System.getenv("LOCALAPPDATA")?.takeIf { it.isNotBlank() }
-                (localAppData?.let(Paths::get) ?: userHome.resolve("AppData/Local")).resolve("Nuvio/Cache")
+                (localAppData?.let(Paths::get) ?: userHome.resolve("AppData/Local")).resolve(dataDirName).resolve("Cache")
             }
             else -> {
                 val xdgCache = System.getenv("XDG_CACHE_HOME")?.takeIf { it.isNotBlank() }
-                (xdgCache?.let(Paths::get) ?: userHome.resolve(".cache")).resolve("nuvio")
+                (xdgCache?.let(Paths::get) ?: userHome.resolve(".cache")).resolve(dataDirName.lowercase(Locale.ROOT))
             }
         }
     }
