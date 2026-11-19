@@ -114,10 +114,31 @@ jobs:
             --stacktrace
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: Package portable build
+        shell: pwsh
+        run: |
+          # packageReleaseMsi builds this app folder first; zipping it gives a no-install build.
+          $appDir = "composeApp\build\compose\binaries\main-release\app\Nuvio"
+          if (-not (Test-Path "$appDir\Nuvio.exe")) {
+            throw "Expected the app folder with Nuvio.exe at $appDir"
+          }
+          New-Item -ItemType Directory -Force -Path portable | Out-Null
+          Compress-Archive -Path $appDir -DestinationPath portable\Nuvio-Windows-x64-portable.zip
+
+      - name: Upload portable build
+        uses: actions/upload-artifact@v7
+        with:
+          name: nuvio-windows-x64-portable-${{ github.sha }}
+          path: portable/Nuvio-Windows-x64-portable.zip
+          if-no-files-found: error
+          retention-days: 14
+          # Already a zip; recompressing only costs time.
+          compression-level: 0
+
       - name: Upload MSI
         uses: actions/upload-artifact@v7
         with:
-          name: nuvio-windows-x64-${{ github.sha }}
+          name: nuvio-windows-x64-msi-${{ github.sha }}
           path: composeApp/build/compose/release-msis/*.msi
           if-no-files-found: error
           retention-days: 14
