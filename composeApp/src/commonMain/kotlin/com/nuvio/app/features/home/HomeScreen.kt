@@ -7,8 +7,10 @@ import androidx.compose.foundation.gestures.stopScroll
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.layout.LazyLayoutCacheWindow
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -16,6 +18,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -163,7 +167,9 @@ fun HomeScreen(
         HomeCatalogSettingsRepository.snapshot()
         HomeCatalogSettingsRepository.uiState
     }.collectAsStateWithLifecycle()
-    val homeListState = rememberSaveable(saver = LazyListState.Saver) { LazyListState() }
+    // Rows within this window below the screen are composed early, so their posters
+    // are already fetching (behind skeletons) by the time they scroll into view.
+    val homeListState = rememberSaveable(saver = HomeListStateSaver) { homeListStateWithCacheWindow() }
     val continueWatchingListState = rememberLazyListState()
     val upcomingListState = rememberLazyListState()
     ScreenActivityEffect(homeListState, continueWatchingListState, upcomingListState) { active ->
@@ -2089,3 +2095,22 @@ private fun List<ManagedAddon>.toHomeAddonSignals(): HomeAddonSignals =
         manifestsLoading = any { it.isRefreshing },
         manifestErrorMessage = firstEnabledManifestError(),
     )
+
+@OptIn(ExperimentalFoundationApi::class)
+private val HomeRowCacheWindow = LazyLayoutCacheWindow(ahead = 600.dp, behind = 200.dp)
+
+@OptIn(ExperimentalFoundationApi::class)
+private fun homeListStateWithCacheWindow(
+    firstVisibleItemIndex: Int = 0,
+    firstVisibleItemScrollOffset: Int = 0,
+): LazyListState = LazyListState(
+    cacheWindow = HomeRowCacheWindow,
+    firstVisibleItemIndex = firstVisibleItemIndex,
+    firstVisibleItemScrollOffset = firstVisibleItemScrollOffset,
+)
+
+// LazyListState.Saver would restore without the cache window, so save the position only.
+private val HomeListStateSaver: Saver<LazyListState, *> = listSaver(
+    save = { state -> listOf(state.firstVisibleItemIndex, state.firstVisibleItemScrollOffset) },
+    restore = { saved -> homeListStateWithCacheWindow(saved[0], saved[1]) },
+)

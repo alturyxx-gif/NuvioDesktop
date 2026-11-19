@@ -10,6 +10,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -36,6 +37,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -48,6 +50,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -268,6 +271,26 @@ fun NuvioPosterCard(
     )
     val shouldShowTitleBelow = showTitleBelow && !posterCardStyle.hideLabelsEnabled
 
+    // Inside a revealing row (see PosterRowReveal) the card loads normally but stays under
+    // a skeleton until the whole row is ready. Elsewhere this is all inert.
+    val rowLoad = LocalPosterRowLoadState.current
+    val loadHandle = remember(rowLoad?.tracker, imageUrl) { rowLoad?.tracker?.newHandle() }
+    if (loadHandle != null) {
+        DisposableEffect(loadHandle) {
+            loadHandle.register()
+            if (imageUrl == null) loadHandle.settle()
+            // A card scrolled away before loading must not hold the row back.
+            onDispose { loadHandle.settle() }
+        }
+    }
+    val showSkeleton = rowLoad?.skeletonVisible == true
+    val revealProgress: () -> Float = rowLoad?.revealProgress ?: FullyRevealed
+    val revealedTextModifier = if (showSkeleton) {
+        Modifier.graphicsLayer { alpha = revealProgress() }
+    } else {
+        Modifier
+    }
+
     Column(
         modifier = Modifier
             .desktopPosterHoverScale()
@@ -313,6 +336,8 @@ fun NuvioPosterCard(
                     model = imageModel,
                     contentDescription = title,
                     modifier = Modifier.matchParentSize(),
+                    onSuccess = if (loadHandle != null) { { loadHandle.settle() } } else null,
+                    onError = if (loadHandle != null) { { loadHandle.settle() } } else null,
                     contentScale = ContentScale.Crop,
                     desktopAnimation = posterCardStyle.animatedArtworkMode.toDesktopAnimation(),
                 )
@@ -373,23 +398,41 @@ fun NuvioPosterCard(
             }
 
             NuvioPosterWatchedOverlay(isWatched = isWatched)
+
+            if (showSkeleton) {
+                // Drawn over the card, so the image keeps loading underneath.
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .graphicsLayer { alpha = 1f - revealProgress() }
+                        .skeleton(RectangleShape),
+                )
+            }
         }
         if (shouldShowTitleBelow) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.bodyMedium,
-                color = tokens.colors.textPrimary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            if (!detailLine.isNullOrBlank()) {
+            Box {
                 Text(
-                    text = detailLine,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = tokens.colors.textMuted,
+                    text = title,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = tokens.colors.textPrimary,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
+                    modifier = revealedTextModifier,
                 )
+                if (showSkeleton) PosterSkeletonTextBar(widthFraction = 0.8f, revealProgress = revealProgress)
+            }
+            if (!detailLine.isNullOrBlank()) {
+                Box {
+                    Text(
+                        text = detailLine,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = tokens.colors.textMuted,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = revealedTextModifier,
+                    )
+                    if (showSkeleton) PosterSkeletonTextBar(widthFraction = 0.35f, revealProgress = revealProgress)
+                }
             } else {
                 Box(modifier = Modifier.height(NuvioTokens.Space.none))
             }
@@ -397,6 +440,21 @@ fun NuvioPosterCard(
             Box(modifier = Modifier.height(NuvioTokens.Space.none))
         }
     }
+}
+
+private val FullyRevealed: () -> Float = { 1f }
+
+/** A placeholder line standing in for a card's title or year until its row is revealed. */
+@Composable
+private fun BoxScope.PosterSkeletonTextBar(widthFraction: Float, revealProgress: () -> Float) {
+    Box(
+        modifier = Modifier
+            .align(Alignment.CenterStart)
+            .fillMaxWidth(widthFraction)
+            .height(10.dp)
+            .graphicsLayer { alpha = 1f - revealProgress() }
+            .skeleton(RoundedCornerShape(4.dp)),
+    )
 }
 
 @Composable

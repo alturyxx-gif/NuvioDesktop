@@ -8,6 +8,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.Dp
 import com.nuvio.app.core.ui.NuvioShelfSection
 import com.nuvio.app.core.ui.NuvioViewAllPillSize
+import com.nuvio.app.core.ui.PosterRowReveal
 import com.nuvio.app.core.ui.rememberPosterCardStyleUiState
 import com.nuvio.app.isDesktop
 import com.nuvio.app.features.home.HomeCatalogSection
@@ -70,27 +71,30 @@ private fun HomeCatalogRowSectionContent(
 ) {
     val posterCardStyle = rememberPosterCardStyleUiState()
 
-    NuvioShelfSection(
-        title = section.title,
-        entries = entries,
-        modifier = modifier,
-        headerHorizontalPadding = sectionPadding,
-        rowContentPadding = PaddingValues(horizontal = sectionPadding),
-        onViewAllClick = onViewAllClick,
-        onTitleClick = onViewAllClick?.takeIf { isDesktop },
-        viewAllPillSize = NuvioViewAllPillSize.Compact,
-        key = { item -> item.stableKey() },
-    ) { item ->
-        HomePosterCard(
-            item = item,
-            useLandscapeBackdropMode = posterCardStyle.catalogLandscapeModeEnabled,
-            isWatched = WatchingState.isPosterWatched(
-                watchedKeys = watchedKeys,
+    // Skeleton cards until this row's posters have loaded, then they appear together.
+    PosterRowReveal(rowKey = section.key) {
+        NuvioShelfSection(
+            title = section.title,
+            entries = entries,
+            modifier = modifier,
+            headerHorizontalPadding = sectionPadding,
+            rowContentPadding = PaddingValues(horizontal = sectionPadding),
+            onViewAllClick = onViewAllClick,
+            onTitleClick = onViewAllClick?.takeIf { isDesktop },
+            viewAllPillSize = NuvioViewAllPillSize.Compact,
+            key = { item -> item.stableKey() },
+        ) { item ->
+            HomePosterCard(
                 item = item,
-                fullyWatchedSeriesKeys = fullyWatchedSeriesKeys,
-            ),
-            onClick = onPosterClick?.let { { it(item) } },
-            onLongClick = onPosterLongClick?.let { { it(item) } },
-        )
+                useLandscapeBackdropMode = posterCardStyle.catalogLandscapeModeEnabled,
+                isWatched = WatchingState.isPosterWatched(
+                    watchedKeys = watchedKeys,
+                    item = item,
+                    fullyWatchedSeriesKeys = fullyWatchedSeriesKeys,
+                ),
+                onClick = onPosterClick?.let { { it(item) } },
+                onLongClick = onPosterLongClick?.let { { it(item) } },
+            )
+        }
     }
 }
