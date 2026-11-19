@@ -17,7 +17,8 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.layout.boundsInRoot
-import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.unit.Dp
@@ -158,10 +159,10 @@ fun Modifier.nuvioContentEntry(): Modifier = composed {
  * starts on content instead of chrome, a hero, or a section header.
  */
 internal object FirstPosterEntry {
+    // Positions are read from the live coordinates only when focus is requested, rather
+    // than recomputed for every row on every scroll frame.
     private class Candidate(val requester: FocusRequester) {
-        var top: Float = Float.MAX_VALUE
-        var left: Float = Float.MAX_VALUE
-        var placed: Boolean = false
+        var coordinates: LayoutCoordinates? = null
     }
 
     private val candidates = mutableMapOf<Any, Candidate>()
@@ -174,18 +175,19 @@ internal object FirstPosterEntry {
         candidates.remove(key)
     }
 
-    fun updateBounds(key: Any, top: Float, left: Float) {
-        candidates[key]?.let {
-            it.top = top
-            it.left = left
-            it.placed = true
-        }
+    fun updateCoordinates(key: Any, coordinates: LayoutCoordinates) {
+        candidates[key]?.coordinates = coordinates
     }
 
     fun request(): Boolean {
         val target = candidates.values
-            .filter { it.placed && it.top >= 0f }
-            .minWithOrNull(compareBy({ it.top }, { it.left }))
+            .mapNotNull { candidate ->
+                val bounds = candidate.coordinates?.takeIf { it.isAttached }?.boundsInRoot()
+                    ?: return@mapNotNull null
+                bounds.takeIf { it.top >= 0f }?.let { candidate to it }
+            }
+            .minWithOrNull(compareBy({ it.second.top }, { it.second.left }))
+            ?.first
             ?: return false
         return runCatching { target.requester.requestFocus() }.isSuccess
     }
@@ -212,11 +214,8 @@ fun Modifier.nuvioFirstPosterCandidate(): Modifier = composed {
     this
         .focusRequester(requester)
         .onFocusChanged { focused = it.isFocused }
-        .onGloballyPositioned { coordinates ->
-            if (screenActive) {
-                val bounds = coordinates.boundsInRoot()
-                FirstPosterEntry.updateBounds(key, bounds.top, bounds.left)
-            }
+        .onPlaced { coordinates ->
+            if (screenActive) FirstPosterEntry.updateCoordinates(key, coordinates)
         }
         .focusable()
 }

@@ -29,10 +29,16 @@ internal fun ClickableHandCursor(window: ComposeWindow) {
         Toolkit.getDefaultToolkit().addAWTEventListener(controller, HandCursorEventMask)
         onDispose {
             Toolkit.getDefaultToolkit().removeAWTEventListener(controller)
-            controller.release()
+            controller.dispose()
         }
     }
 }
+
+// Each lookup walks the semantics tree under the pointer, materializing child lists and
+// window bounds at every level. Running it for every mouse move and wheel tick was a
+// steady main-thread cost while moving over or scrolling the homepage, so moves are
+// throttled to this interval and wheel scrolling only re-checks once it pauses.
+private const val HandCursorUpdateDelayMs = 50
 
 private const val HandCursorEventMask =
     AWTEvent.MOUSE_MOTION_EVENT_MASK or AWTEvent.MOUSE_EVENT_MASK or AWTEvent.MOUSE_WHEEL_EVENT_MASK
@@ -42,15 +48,34 @@ private class HandCursorController(private val window: ComposeWindow) : AWTEvent
     private var overridden: Component? = null
     private var cursorBeforeOverride: Cursor? = null
     private var pending: MouseEvent? = null
+    private var immediateScheduled = false
+
+    // Fires on the EDT after Compose has handled the event, so its own cursor choice is
+    // already applied by the time update() runs.
+    private val updateTimer = javax.swing.Timer(HandCursorUpdateDelayMs) { update() }.apply {
+        isRepeats = false
+    }
 
     override fun eventDispatched(event: AWTEvent) {
         val mouseEvent = event as? MouseEvent ?: return
         val source = mouseEvent.component ?: return
         if (source !== window && !SwingUtilities.isDescendingFrom(source, window)) return
-        val alreadyScheduled = pending != null
         pending = mouseEvent
-        // Runs after Compose has handled the event, so its own cursor choice is already applied.
-        if (!alreadyScheduled) SwingUtilities.invokeLater(::update)
+        when {
+            // Leaving the window or pressing a button resolves without a tree lookup.
+            mouseEvent.id == MouseEvent.MOUSE_EXITED || mouseEvent.modifiersEx and AnyButtonDownMask != 0 -> {
+                if (!immediateScheduled) {
+                    immediateScheduled = true
+                    SwingUtilities.invokeLater {
+                        immediateScheduled = false
+                        update()
+                    }
+                }
+            }
+            // Content moves under a still pointer while scrolling; check once it settles.
+            mouseEvent.id == MouseEvent.MOUSE_WHEEL -> updateTimer.restart()
+            !updateTimer.isRunning -> updateTimer.start()
+        }
     }
 
     private fun update() {
@@ -75,6 +100,12 @@ private class HandCursorController(private val window: ComposeWindow) : AWTEvent
         cursorBeforeOverride = if (component.isCursorSet) current else null
         overridden = component
         component.cursor = handCursor
+    }
+
+    fun dispose() {
+        updateTimer.stop()
+        pending = null
+        release()
     }
 
     fun release() {

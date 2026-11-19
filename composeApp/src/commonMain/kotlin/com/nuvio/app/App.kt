@@ -17,6 +17,7 @@ import coil3.svg.SvgDecoder
 import com.nuvio.app.core.poster.CustomPosterFallbackInterceptor
 import com.nuvio.app.core.ui.NativeProfileSwitcherController
 import com.nuvio.app.core.ui.NuvioTheme
+import com.nuvio.app.core.ui.ProvideSharedCardStyleStates
 import com.nuvio.app.core.ui.nuvioTrackFocusPresence
 import com.nuvio.app.core.ui.PlatformKeyboardNavigationHost
 import com.nuvio.app.core.ui.addPlatformDecoders
@@ -119,7 +120,7 @@ internal fun AppEnvironment(content: @Composable () -> Unit) {
             desktopUiScale = desktopUiScaleForWindow(maxWidth.value, maxHeight.value),
         ) {
             PlatformKeyboardNavigationHost()
-            content()
+            ProvideSharedCardStyleStates(content)
         }
     }
 }

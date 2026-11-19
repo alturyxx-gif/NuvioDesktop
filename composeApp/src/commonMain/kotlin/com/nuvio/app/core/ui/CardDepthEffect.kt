@@ -17,6 +17,7 @@ import androidx.compose.ui.graphics.drawscope.clipPath
 @Composable
 fun rememberCardDepthStyleUiState(): CardDepthStyleUiState {
     CardDepthStyleRepository.ensureLoaded()
+    sharedCardDepthStyleUiState()?.let { return it }
     val uiState by CardDepthStyleRepository.uiState.collectAsState()
     return uiState
 }
