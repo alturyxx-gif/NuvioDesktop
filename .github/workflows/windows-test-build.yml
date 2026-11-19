@@ -61,6 +61,10 @@ jobs:
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
+        with:
+          # The action only saves its cache on the default branch unless told otherwise,
+          # and these builds run on feature branches.
+          cache-read-only: false
 
       - name: Configure runtime properties
         shell: bash
