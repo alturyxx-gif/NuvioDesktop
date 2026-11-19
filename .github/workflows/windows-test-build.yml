@@ -71,6 +71,8 @@ jobs:
             echo "Using runtime properties from the repository secret."
           else
             echo "::warning::NUVIO_DESKTOP_LOCAL_PROPERTIES_BASE64 is not set; sign-in, sync and Trakt are disabled in this build."
+            # The build declares local.properties as an input file, so it must exist even when empty.
+            : > local.properties
           fi
 
       - name: Install WebView2 SDK
