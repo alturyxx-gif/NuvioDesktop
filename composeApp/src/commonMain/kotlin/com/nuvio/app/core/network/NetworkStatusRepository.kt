@@ -136,6 +136,13 @@ object NetworkStatusRepository {
             return NetworkCondition.NoInternet
         }
 
+        // With no backend configured (builds without runtime config) there is nothing to
+        // reach; reporting that as an outage made every unrelated load failure read
+        // "could not reach required servers".
+        if (ServerConfigurationRepository.active.value.backendUrl.isBlank()) {
+            return NetworkCondition.Online
+        }
+
         val supabaseReachable = SupabaseEndpointConfig.restEndpointUrls().any { url ->
             probeReachable(
                 url = url,
