@@ -28,14 +28,28 @@ import org.jetbrains.compose.resources.stringResource
 // device per GPU, so the first result is kept for the session.
 private var cachedHardwareDecodeReport: List<HardwareDecodeAdapter>? = null
 
+/** The GPU decoder report, queried once per session off the main thread; null while loading. */
 @Composable
-internal fun HardwareDecodeSupportSection(isTablet: Boolean) {
+internal fun rememberHardwareDecodeReport(): List<HardwareDecodeAdapter>? {
     val report by produceState(initialValue = cachedHardwareDecodeReport) {
         if (value == null) {
             value = withContext(Dispatchers.Default) { HardwareDecodeCapabilities.query() }
                 .also { cachedHardwareDecodeReport = it }
         }
     }
+    return report
+}
+
+/**
+ * False only when the report positively lists the GPUs and none is NVIDIA. Unknown
+ * (still loading, or the query failed) counts as possibly present.
+ */
+internal fun List<HardwareDecodeAdapter>?.mayHaveNvidiaGpu(): Boolean =
+    this == null || isEmpty() || any { it.name.contains("NVIDIA", ignoreCase = true) }
+
+@Composable
+internal fun HardwareDecodeSupportSection(isTablet: Boolean) {
+    val report = rememberHardwareDecodeReport()
     val tokens = MaterialTheme.nuvio
     val horizontalPadding = if (isTablet) 20.dp else 16.dp
 

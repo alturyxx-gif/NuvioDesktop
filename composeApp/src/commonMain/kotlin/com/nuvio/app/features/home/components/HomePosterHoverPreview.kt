@@ -40,6 +40,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -75,6 +76,7 @@ import com.nuvio.app.core.format.formatReleaseDateForDisplay
 import com.nuvio.app.core.ui.NuvioAsyncImage
 import com.nuvio.app.core.ui.NuvioPosterWatchedOverlay
 import com.nuvio.app.core.ui.NuvioTokens
+import com.nuvio.app.core.ui.PosterCardStyleUiState
 import com.nuvio.app.core.ui.PosterZoomOverlayCoordinator
 import com.nuvio.app.core.ui.nuvio
 import com.nuvio.app.core.ui.rememberPosterCardStyleUiState
@@ -140,8 +142,45 @@ internal fun HomePosterHoverPreview(
     }
 
     val anchorInteractionSource = remember { MutableInteractionSource() }
-    val previewInteractionSource = remember { MutableInteractionSource() }
     val anchorHovered by anchorInteractionSource.collectIsHoveredAsState()
+    // Everything the preview needs (state, effects, action handlers, popup) is composed only
+    // once the pointer first reaches this poster. Composing it eagerly cost every poster
+    // several coroutines and state holders as rows scrolled into view, though at most one
+    // preview is ever open.
+    var previewArmed by remember(item.type, item.id) { mutableStateOf(false) }
+    if (anchorHovered && !previewArmed) {
+        SideEffect { previewArmed = true }
+    }
+
+    Box(modifier = modifier) {
+        content(Modifier.hoverable(anchorInteractionSource))
+
+        if (previewArmed) {
+            HomePosterHoverPreviewHost(
+                item = item,
+                isWatched = isWatched,
+                onClick = onClick,
+                onLongClick = onLongClick,
+                anchorHovered = anchorHovered,
+                posterCardStyle = posterCardStyle,
+                trailerPlaybackEnabled = trailerPlaybackEnabled,
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalComposeUiApi::class)
+@Composable
+private fun HomePosterHoverPreviewHost(
+    item: MetaPreview,
+    isWatched: Boolean,
+    onClick: (() -> Unit)?,
+    onLongClick: (() -> Unit)?,
+    anchorHovered: Boolean,
+    posterCardStyle: PosterCardStyleUiState,
+    trailerPlaybackEnabled: Boolean,
+) {
+    val previewInteractionSource = remember { MutableInteractionSource() }
     val previewHovered by previewInteractionSource.collectIsHoveredAsState()
     var previewVisible by remember(item.type, item.id) { mutableStateOf(false) }
     var popupMounted by remember(item.type, item.id) { mutableStateOf(false) }
@@ -280,66 +319,63 @@ internal fun HomePosterHoverPreview(
         }
     }
 
-    Box(modifier = modifier) {
-        content(Modifier.hoverable(anchorInteractionSource))
 
-        if (popupMounted) {
-            Popup(
-                popupPositionProvider = positionProvider,
-                properties = PopupProperties(focusable = false),
+    if (popupMounted) {
+        Popup(
+            popupPositionProvider = positionProvider,
+            properties = PopupProperties(focusable = false),
+        ) {
+            AnimatedVisibility(
+                visible = previewVisible,
+                enter = fadeIn(
+                    animationSpec = tween(
+                        durationMillis = HoverPreviewEnterDurationMillis,
+                        easing = NuvioTokens.Motion.decelerate,
+                    ),
+                ) + scaleIn(
+                    animationSpec = tween(
+                        durationMillis = HoverPreviewEnterDurationMillis,
+                        easing = NuvioTokens.Motion.emphasized,
+                    ),
+                    initialScale = 0.9f,
+                ) + slideInVertically(
+                    animationSpec = tween(
+                        durationMillis = HoverPreviewEnterDurationMillis,
+                        easing = NuvioTokens.Motion.decelerate,
+                    ),
+                    initialOffsetY = { height -> height / 18 },
+                ),
+                exit = fadeOut(
+                    animationSpec = tween(HoverPreviewExitDurationMillis),
+                ) + scaleOut(
+                    animationSpec = tween(HoverPreviewExitDurationMillis),
+                    targetScale = 0.97f,
+                ) + slideOutVertically(
+                    animationSpec = tween(HoverPreviewExitDurationMillis),
+                    targetOffsetY = { height -> height / 32 },
+                ),
             ) {
-                AnimatedVisibility(
-                    visible = previewVisible,
-                    enter = fadeIn(
-                        animationSpec = tween(
-                            durationMillis = HoverPreviewEnterDurationMillis,
-                            easing = NuvioTokens.Motion.decelerate,
-                        ),
-                    ) + scaleIn(
-                        animationSpec = tween(
-                            durationMillis = HoverPreviewEnterDurationMillis,
-                            easing = NuvioTokens.Motion.emphasized,
-                        ),
-                        initialScale = 0.9f,
-                    ) + slideInVertically(
-                        animationSpec = tween(
-                            durationMillis = HoverPreviewEnterDurationMillis,
-                            easing = NuvioTokens.Motion.decelerate,
-                        ),
-                        initialOffsetY = { height -> height / 18 },
-                    ),
-                    exit = fadeOut(
-                        animationSpec = tween(HoverPreviewExitDurationMillis),
-                    ) + scaleOut(
-                        animationSpec = tween(HoverPreviewExitDurationMillis),
-                        targetScale = 0.97f,
-                    ) + slideOutVertically(
-                        animationSpec = tween(HoverPreviewExitDurationMillis),
-                        targetOffsetY = { height -> height / 32 },
-                    ),
-                ) {
-                    HomePosterPreviewCard(
-                        item = item,
-                        isWatched = isWatched,
-                        isSaved = previewIsSaved,
-                        trailerEnabled = trailerPlaybackEnabled,
-                        trailerSoundEnabled = posterCardStyle.hoverPreviewTrailerSoundEnabled,
-                        trailerStartSeconds = posterCardStyle.hoverPreviewTrailerStartSeconds,
-                        trailerPlaybackSource = trailerPlaybackSource,
-                        modifier = Modifier
-                            .platformTouchScroll()
-                            .hoverable(previewInteractionSource)
-                            .onPointerEvent(PointerEventType.Scroll) {
-                                previewDismissedByScroll = true
-                                previewVisible = false
-                                popupMounted = false
-                            },
-                        onClick = onClick,
-                        onLongClick = onLongClick,
-                        onWatchedClick = onWatchedClick,
-                        onSaveClick = onSaveClick,
-                    )
-                }
+                HomePosterPreviewCard(
+                    item = item,
+                    isWatched = isWatched,
+                    isSaved = previewIsSaved,
+                    trailerEnabled = trailerPlaybackEnabled,
+                    trailerSoundEnabled = posterCardStyle.hoverPreviewTrailerSoundEnabled,
+                    trailerStartSeconds = posterCardStyle.hoverPreviewTrailerStartSeconds,
+                    trailerPlaybackSource = trailerPlaybackSource,
+                    modifier = Modifier
+                        .platformTouchScroll()
+                        .hoverable(previewInteractionSource)
+                        .onPointerEvent(PointerEventType.Scroll) {
+                            previewDismissedByScroll = true
+                            previewVisible = false
+                            popupMounted = false
+                        },
+                    onClick = onClick,
+                    onLongClick = onLongClick,
+                    onWatchedClick = onWatchedClick,
+                    onSaveClick = onSaveClick,
+                )
             }
         }
     }

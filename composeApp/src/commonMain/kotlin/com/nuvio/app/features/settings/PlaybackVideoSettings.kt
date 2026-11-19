@@ -109,7 +109,14 @@ internal fun PlaybackVideoSettings(
                     }
                 }
             }
-            if (isWindows) {
+            // RTX Video forces the NVIDIA adapter and NVIDIA-only video filters, which can
+            // break playback on a PC without one. Hide it once the GPU report shows no NVIDIA
+            // GPU, unless a toggle is already on and needs turning off.
+            val hardwareDecodeReport = if (isWindows) rememberHardwareDecodeReport() else null
+            val rtxVideoAvailable = hardwareDecodeReport.mayHaveNvidiaGpu() ||
+                settings.nvidiaRtxSuperResolutionEnabled ||
+                settings.nvidiaRtxHdrEnabled
+            if (isWindows && rtxVideoAvailable) {
                 SettingsSection(
                     title = stringResource(Res.string.settings_playback_nvidia_rtx_video_section),
                     isTablet = isTablet,

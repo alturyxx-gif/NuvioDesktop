@@ -206,11 +206,28 @@ private fun Image.toScaledBitmapPainter(desktopImageScaling: NuvioDesktopImageSc
         ?.let { imageBitmap -> ScaledBitmapPainter(imageBitmap) }
 }
 
+// Mipmapped CPU scaling of a poster takes a few milliseconds; done on the UI thread at
+// first draw, a row of posters scrolling in stacked those into one long frame. One
+// low-priority thread keeps it off the UI thread without competing with it on
+// laptops with few cores.
+private val ImageScaleExecutor = java.util.concurrent.Executors.newSingleThreadExecutor { task ->
+    Thread(task, "nuvio-image-scale").apply {
+        isDaemon = true
+        priority = Thread.NORM_PRIORITY - 1
+    }
+}
+
+/** A finished scale for [size]; a null [bitmap] means scaling failed and the source is drawn. */
+private class ScaledBitmapResult(val size: IntSize, val bitmap: ImageBitmap?)
+
 private class ScaledBitmapPainter(
     private val image: ImageBitmap,
 ) : Painter() {
-    private var cachedSize: IntSize? = null
-    private var cachedBitmap: ImageBitmap? = null
+    // Read in onDraw, so publishing a finished scale redraws the image.
+    private val scaled = mutableStateOf<ScaledBitmapResult?>(null)
+
+    // Only touched on the UI thread (onDraw and the invokeLater callback).
+    private var requestedSize: IntSize? = null
     private var alpha: Float = DefaultAlpha
     private var colorFilter: ColorFilter? = null
 
@@ -233,7 +250,14 @@ private class ScaledBitmapPainter(
             return
         }
 
-        val bitmap = scaledBitmap(cacheSize)
+        val result = scaled.value?.takeIf { it.size == cacheSize }
+        if (result == null) {
+            requestScale(cacheSize)
+            // Until the background scale lands, the GPU draws the source directly.
+            drawSource(drawSize)
+            return
+        }
+        val bitmap = result.bitmap
         if (bitmap == null) {
             drawSource(drawSize)
             return
@@ -261,12 +285,15 @@ private class ScaledBitmapPainter(
         return true
     }
 
-    private fun scaledBitmap(size: IntSize): ImageBitmap? {
-        if (cachedSize == size) return cachedBitmap
-        // A failed scale is remembered as null for this size so it isn't retried every frame.
-        return image.scale(size.width, size.height).also { bitmap ->
-            cachedSize = size
-            cachedBitmap = bitmap
+    private fun requestScale(size: IntSize) {
+        if (requestedSize == size) return
+        requestedSize = size
+        ImageScaleExecutor.execute {
+            val bitmap = runCatching { image.scale(size.width, size.height) }.getOrNull()
+            java.awt.EventQueue.invokeLater {
+                // Drop results for a size that is no longer wanted (e.g. after a resize).
+                if (requestedSize == size) scaled.value = ScaledBitmapResult(size, bitmap)
+            }
         }
     }
 
@@ -334,12 +361,12 @@ private class ScaledBitmapPainter(
             return null
         }
         val pixmap = bitmap.peekPixels()
-        val scaled = pixmap != null && scalePixels(
+        val wrote = pixmap != null && scalePixels(
             pixmap,
             FilterMipmap(FilterMode.LINEAR, MipmapMode.LINEAR),
             false,
         )
-        if (!scaled) {
+        if (!wrote) {
             bitmap.close()
             return null
         }
