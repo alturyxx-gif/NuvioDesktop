@@ -118,6 +118,6 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: nuvio-windows-x64-${{ github.sha }}
-          path: composeApp/build/compose/**/*.msi
+          path: composeApp/build/compose/release-msis/*.msi
           if-no-files-found: error
           retention-days: 14
