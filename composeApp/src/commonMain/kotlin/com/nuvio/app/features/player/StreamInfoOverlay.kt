@@ -94,7 +94,7 @@ internal fun StreamInfoOverlay(
                 }
             }
 
-            if (mediaInfo.videoCodec != null || mediaInfo.videoWidth != null || mediaInfo.videoFrameRate != null) {
+            if (mediaInfo.videoCodec != null || mediaInfo.videoWidth != null || mediaInfo.videoFrameRate != null || mediaInfo.videoDecoder != null) {
                 StreamInfoSection(stringResource(Res.string.stream_info_section_video)) {
                     StreamInfoRow {
                         StreamInfoItem(stringResource(Res.string.stream_info_codec), mediaInfo.videoCodec)
@@ -111,6 +111,14 @@ internal fun StreamInfoOverlay(
                         StreamInfoItem(
                             stringResource(Res.string.stream_info_bitrate),
                             mediaInfo.videoBitrate?.let(::formatBitrate),
+                        )
+                        StreamInfoItem(
+                            stringResource(Res.string.stream_info_decoder),
+                            videoDecoderLabel(mediaInfo.videoDecoder),
+                        )
+                        StreamInfoItem(
+                            stringResource(Res.string.stream_info_dropped_frames),
+                            mediaInfo.droppedFrames?.toString(),
                         )
                     }
                 }
@@ -295,7 +303,7 @@ internal fun rememberStreamInfoSections(
             stringResource(Res.string.stream_info_server) to serverPlayback,
         ),
     )
-    val video = if (mediaInfo.videoCodec != null || mediaInfo.videoWidth != null || mediaInfo.videoFrameRate != null) {
+    val video = if (mediaInfo.videoCodec != null || mediaInfo.videoWidth != null || mediaInfo.videoFrameRate != null || mediaInfo.videoDecoder != null) {
         PlayerControlInfoSection(
             title = stringResource(Res.string.stream_info_section_video),
             items = items(
@@ -307,6 +315,8 @@ internal fun rememberStreamInfoSections(
                 stringResource(Res.string.stream_info_frame_rate) to
                     mediaInfo.videoFrameRate?.let { "${formatDecimal(it.toDouble(), 3)} fps" },
                 stringResource(Res.string.stream_info_bitrate) to mediaInfo.videoBitrate?.let(::formatBitrate),
+                stringResource(Res.string.stream_info_decoder) to videoDecoderLabel(mediaInfo.videoDecoder),
+                stringResource(Res.string.stream_info_dropped_frames) to mediaInfo.droppedFrames?.toString(),
             ),
         )
     } else null
@@ -347,4 +357,12 @@ internal fun rememberStreamInfoSections(
         )
     } else null
     return listOfNotNull(source, video, audio, subtitle)
+}
+
+/** mpv reports "no" in `hwdec-current` when the CPU is decoding. */
+@Composable
+private fun videoDecoderLabel(hwdecCurrent: String?): String? = when {
+    hwdecCurrent == null -> null
+    hwdecCurrent.equals("no", ignoreCase = true) -> stringResource(Res.string.stream_info_decoder_software)
+    else -> stringResource(Res.string.stream_info_decoder_hardware, hwdecCurrent)
 }

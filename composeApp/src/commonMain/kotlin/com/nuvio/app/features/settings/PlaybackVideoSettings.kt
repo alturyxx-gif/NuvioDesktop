@@ -17,6 +17,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.nuvio.app.features.player.AndroidLibmpvVideoOutput
 import com.nuvio.app.features.player.AndroidPlaybackEngine
+import com.nuvio.app.features.player.HardwareDecodeCapabilities
 import com.nuvio.app.features.player.IosHardwareDecoderMode
 import com.nuvio.app.features.player.localizedLabel
 import com.nuvio.app.features.player.IosTargetPrimaries
@@ -131,6 +132,9 @@ internal fun PlaybackVideoSettings(
                         )
                     }
                 }
+            }
+            if (HardwareDecodeCapabilities.isSupported) {
+                HardwareDecodeSupportSection(isTablet = isTablet)
             }
         } else {
             SettingsSection(

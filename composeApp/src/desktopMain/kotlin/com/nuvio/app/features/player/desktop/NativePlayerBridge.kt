@@ -94,6 +94,9 @@ internal object NativePlayerBridge {
     external fun audioTracksJson(handle: Long): String
     external fun subtitleTracksJson(handle: Long): String
     external fun stringProperty(handle: Long, name: String): String
+
+    /** Windows only: per-GPU hardware decoder report, parsed by parseHardwareDecodeReport. */
+    external fun hardwareDecoderSupport(): String
     external fun selectAudioTrack(handle: Long, trackId: Int)
     external fun setAudioLanguages(handle: Long, languages: String)
     external fun selectSubtitleTrack(handle: Long, trackId: Int)

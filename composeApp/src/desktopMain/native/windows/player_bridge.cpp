@@ -4,6 +4,7 @@
 #include <windows.h>
 #include <windowsx.h>
 #include <d3d11.h>
+#include <dxgi1_2.h>
 #include <dwmapi.h>
 #include <shlobj.h>
 #include <wrl.h>
@@ -513,6 +514,103 @@ bool unifiedMemoryGpu() {
             options.UnifiedMemoryArchitecture;
     }();
     return unified;
+}
+
+// One row per codec the Settings page lists. Profile GUIDs are the DXVA/D3D11
+// decoder profiles from d3d11.h and dxva.h; spelled out here so an older Windows
+// SDK (which may lack the AV1 constants) still compiles.
+struct HardwareDecodeProfile {
+    const char *key;
+    GUID profile;
+    DXGI_FORMAT format;
+};
+
+const HardwareDecodeProfile kHardwareDecodeProfiles[] = {
+    {"h264", {0x1b81be68, 0xa0c7, 0x11d3, {0xb9, 0x84, 0x00, 0xc0, 0x4f, 0x2e, 0x73, 0xc5}}, DXGI_FORMAT_NV12},
+    {"hevc", {0x5b11d51b, 0x2f4c, 0x4452, {0xbc, 0xc3, 0x09, 0xf2, 0xa1, 0x16, 0x0c, 0xc0}}, DXGI_FORMAT_NV12},
+    {"hevc10", {0x107af0e0, 0xef1a, 0x4d19, {0xab, 0xa8, 0x67, 0xa1, 0x63, 0x07, 0x3d, 0x13}}, DXGI_FORMAT_P010},
+    {"vp9", {0x463707f8, 0xa1d0, 0x4585, {0x87, 0x6d, 0x83, 0xaa, 0x6d, 0x60, 0xb8, 0x9e}}, DXGI_FORMAT_NV12},
+    {"vp910", {0xa4c749ef, 0x6ecf, 0x48aa, {0x84, 0x48, 0x50, 0xa7, 0xa1, 0x16, 0x5f, 0xf7}}, DXGI_FORMAT_P010},
+    {"av1", {0xb8be4ccb, 0xcf53, 0x46ba, {0x8d, 0x59, 0xd6, 0xb8, 0xa6, 0xda, 0x5d, 0x2a}}, DXGI_FORMAT_NV12},
+    {"av110", {0xb8be4ccb, 0xcf53, 0x46ba, {0x8d, 0x59, 0xd6, 0xb8, 0xa6, 0xda, 0x5d, 0x2a}}, DXGI_FORMAT_P010},
+    {"mpeg2", {0xee27417f, 0x5e28, 0x4e65, {0xbe, 0xea, 0x1d, 0x26, 0xb5, 0x08, 0xad, 0xc9}}, DXGI_FORMAT_NV12},
+    {"vc1", {0x1b81bea3, 0xa0c7, 0x11d3, {0xb9, 0x84, 0x00, 0xc0, 0x4f, 0x2e, 0x73, 0xc5}}, DXGI_FORMAT_NV12},
+};
+
+// Whether the driver will create a decoder for this profile at the given size.
+// GetVideoDecoderConfigCount fails or returns 0 when the resolution is beyond the
+// hardware's limit, which is how a 1080p-only HEVC block shows up.
+bool decoderSupportsSize(ID3D11VideoDevice *videoDevice, const HardwareDecodeProfile &entry, UINT width, UINT height) {
+    D3D11_VIDEO_DECODER_DESC desc = {};
+    desc.Guid = entry.profile;
+    desc.SampleWidth = width;
+    desc.SampleHeight = height;
+    desc.OutputFormat = entry.format;
+    UINT configCount = 0;
+    return SUCCEEDED(videoDevice->GetVideoDecoderConfigCount(&desc, &configCount)) && configCount > 0;
+}
+
+// Text report consumed by HardwareDecodeCapabilities.desktop.kt:
+//   adapter=<name>            starts a GPU section (first one is the system default,
+//                             which is the GPU mpv decodes on unless RTX options pick NVIDIA)
+//   <codec>=<supported>,<4k>  1/0 per codec key from kHardwareDecodeProfiles
+std::string hardwareDecoderSupportReport() {
+    std::ostringstream report;
+    ComPtr<ID3D11Device> probeDevice;
+    if (FAILED(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, 0, nullptr, 0, D3D11_SDK_VERSION, &probeDevice, nullptr, nullptr))) {
+        return std::string();
+    }
+    ComPtr<IDXGIDevice> dxgiDevice;
+    ComPtr<IDXGIAdapter> probeAdapter;
+    ComPtr<IDXGIFactory1> factory;
+    if (FAILED(probeDevice.As(&dxgiDevice)) ||
+        FAILED(dxgiDevice->GetAdapter(&probeAdapter)) ||
+        FAILED(probeAdapter->GetParent(__uuidof(IDXGIFactory1), (void **)factory.GetAddressOf()))) {
+        return std::string();
+    }
+
+    ComPtr<IDXGIAdapter1> adapter;
+    for (UINT index = 0; factory->EnumAdapters1(index, &adapter) != DXGI_ERROR_NOT_FOUND; index++) {
+        DXGI_ADAPTER_DESC1 adapterDesc = {};
+        if (FAILED(adapter->GetDesc1(&adapterDesc)) || (adapterDesc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE)) {
+            adapter.Reset();
+            continue;
+        }
+        ComPtr<ID3D11Device> device;
+        ComPtr<ID3D11VideoDevice> videoDevice;
+        if (FAILED(D3D11CreateDevice(adapter.Get(), D3D_DRIVER_TYPE_UNKNOWN, nullptr, D3D11_CREATE_DEVICE_VIDEO_SUPPORT, nullptr, 0, D3D11_SDK_VERSION, &device, nullptr, nullptr)) ||
+            FAILED(device.As(&videoDevice))) {
+            adapter.Reset();
+            continue;
+        }
+
+        std::string name = toUtf8(std::wstring(adapterDesc.Description));
+        for (char &c : name) {
+            if (c == '\n' || c == '\r' || c == '=') c = ' ';
+        }
+        report << "adapter=" << name << "\n";
+
+        UINT profileCount = videoDevice->GetVideoDecoderProfileCount();
+        std::vector<GUID> profiles;
+        for (UINT p = 0; p < profileCount; p++) {
+            GUID guid = {};
+            if (SUCCEEDED(videoDevice->GetVideoDecoderProfile(p, &guid))) profiles.push_back(guid);
+        }
+        for (const HardwareDecodeProfile &entry : kHardwareDecodeProfiles) {
+            bool listed = std::any_of(profiles.begin(), profiles.end(), [&](const GUID &guid) {
+                return IsEqualGUID(guid, entry.profile);
+            });
+            BOOL formatSupported = FALSE;
+            bool supported = listed &&
+                SUCCEEDED(videoDevice->CheckVideoDecoderFormat(&entry.profile, entry.format, &formatSupported)) &&
+                formatSupported &&
+                decoderSupportsSize(videoDevice.Get(), entry, 1920, 1080);
+            bool uhd = supported && decoderSupportsSize(videoDevice.Get(), entry, 3840, 2160);
+            report << entry.key << "=" << (supported ? 1 : 0) << "," << (uhd ? 1 : 0) << "\n";
+        }
+        adapter.Reset();
+    }
+    return report.str();
 }
 
 struct MpvApi {
@@ -2951,6 +3049,17 @@ extern "C" JNIEXPORT jstring JNICALL
 Java_com_nuvio_app_features_player_desktop_NativePlayerBridge_stringProperty(JNIEnv *env, jobject, jlong handle, jstring name) {
     auto player = playerFromHandle(handle);
     return newJavaStringUtf8(env, player ? player->mpvStringProperty(jstringToUtf8(env, name).c_str()) : "");
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_nuvio_app_features_player_desktop_NativePlayerBridge_hardwareDecoderSupport(JNIEnv *env, jobject) {
+    std::string report;
+    try {
+        report = hardwareDecoderSupportReport();
+    } catch (...) {
+        report.clear();
+    }
+    return newJavaStringUtf8(env, report);
 }
 
 extern "C" JNIEXPORT jstring JNICALL

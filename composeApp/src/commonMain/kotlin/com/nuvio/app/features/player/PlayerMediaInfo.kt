@@ -12,6 +12,10 @@ data class PlayerMediaInfo(
     val audioProfiles: List<String> = emptyList(),
     val hdr: List<String> = emptyList(),
     val bitDepth: Int? = null,
+    /** mpv `hwdec-current`: the hardware decoder in use, or "no" when the CPU decodes. */
+    val videoDecoder: String? = null,
+    /** Frames dropped by the decoder plus frames the renderer dropped to keep sync. */
+    val droppedFrames: Long? = null,
 )
 
 internal fun mpvMediaInfo(property: (String) -> String?): PlayerMediaInfo =
@@ -33,6 +37,11 @@ internal fun mpvMediaInfo(property: (String) -> String?): PlayerMediaInfo =
             }
         },
         bitDepth = property("video-params/pixelformat")?.let(::mpvBitDepth),
+        videoDecoder = property("hwdec-current")?.trim()?.takeIf { it.isNotEmpty() },
+        droppedFrames = listOfNotNull(
+            property("decoder-frame-drop-count")?.toLongOrNull(),
+            property("frame-drop-count")?.toLongOrNull(),
+        ).takeIf { it.isNotEmpty() }?.sum(),
     )
 
 private fun mpvBitDepth(pixelFormat: String): Int? = when {
